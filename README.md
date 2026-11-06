@@ -50,7 +50,7 @@ The full numbers are in [docs/REPORT.md](docs/REPORT.md).
 **It's good at sorting patients by risk, not at predicting with certainty.** A score
 of 0.63 is modest, but that's normal for this kind of billing-style data, which
 doesn't include lab trends or doctors' notes. It's still useful: the patients it
-ranks highest really are much more likely to come back. hypothetically, If each follow-up call costs
+ranks highest really are much more likely to come back. Hypothetically, if each follow-up call costs
 $250 and prevents 1 in 5 readmissions, the most value comes from calling roughly the
 top 15% of patients. (Those costs are my guesses, and a hospital would plug in its
 own.)

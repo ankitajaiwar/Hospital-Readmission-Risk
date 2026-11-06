@@ -73,4 +73,4 @@ def save(model, best, results, train_df, out_dir: Path, cleaning: dict) -> None:
         "cleaning": cleaning,
         "environment": {"python": platform.python_version(), "sklearn": sklearn.__version__},
     }
-    (out_dir / "model_card.json").write_text(json.dumps(card, indent=2))
+    (out_dir / "model_card.json").write_text(json.dumps(card, indent=2), encoding="utf-8")

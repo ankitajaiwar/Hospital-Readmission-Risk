@@ -57,7 +57,7 @@ def load():
     d = Path(os.environ.get("MODEL_DIR", "artifacts/model"))
     if not (d / "model.joblib").exists():
         raise RuntimeError(f"No model in {d}. Run the pipeline first.")
-    return joblib.load(d / "model.joblib"), json.loads((d / "model_card.json").read_text())
+    return joblib.load(d / "model.joblib"), json.loads((d / "model_card.json").read_text(encoding="utf-8"))
 
 
 def to_frame(encs: list[Encounter]) -> pd.DataFrame:

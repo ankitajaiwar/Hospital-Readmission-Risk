@@ -1,0 +1,6 @@
+data/
+artifacts/
+artifacts_synthetic/
+__pycache__/
+.pytest_cache/
+.venv/

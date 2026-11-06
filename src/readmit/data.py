@@ -29,7 +29,7 @@ class CleaningReport:
     positive_rate: float = float("nan")
 
     def to_json(self, path: Path) -> None:
-        path.write_text(json.dumps(asdict(self), indent=2))
+        path.write_text(json.dumps(asdict(self), indent=2), encoding="utf-8")
 
 
 def load_raw(path: str | Path) -> pd.DataFrame:
