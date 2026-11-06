@@ -1,115 +1,101 @@
-# 30-day readmission risk: from noisy EHR extract to a scoring service
+# Readmission risk: results of this run
 
-An end-to-end MVP of a hospital predictive-analytics product: it validates and cleans a
-messy clinical extract, trains and calibrates a model, evaluates it the way an
-operations team would use it, audits it across patient subgroups, checks for drift,
-and serves scores through a containerised API.
+## In short
 
-**Data:** UCI *Diabetes 130-US Hospitals, 1999–2008*: 101,766 de-identified inpatient
-encounters, public under CC BY 4.0 ([dataset 296](https://archive.ics.uci.edu/dataset/296)).
-**Task:** at discharge, estimate each adult diabetic patient's risk of readmission
-within 30 days, so a transitional-care team can decide whom to call first.
+The model ranks a readmitted patient above a non-readmitted one 63% of the time (50% would be a coin flip). If a care team called the top 10% of patients by risk score, it would reach 23% of the patients who came back within 30 days.
 
-## Results
+## The patients
 
-Cohort: 69,987 patients (first encounter each, after excluding deaths and hospice
-discharges); 9.0% readmitted within 30 days. Held-out test block = latest 13,998
-encounters. Full report: [docs/REPORT.md](docs/REPORT.md).
+- Hospital stays in the file: 101,766
+- Removed because the patient died or went to hospice: 2,423
+- Removed as repeat visits by the same patient (I kept each patient's first visit): 29,353
+- Removed because sex was not recorded: 3
+- Patients left: 69,987, of whom 9.0% came back within 30 days
+- The earliest 41,992 visits were used to train the model, the next 13,997 to fine-tune it, and the most recent 13,998 to test it.
 
-| Test block (latest encounters) | Value (95% bootstrap CI) |
+## Choosing a model
+
+I tried two models and kept the one that ranked patients better on the fine-tuning set.
+
+| Model | Ranking score (AUROC) |
 |---|---|
-| AUROC | 0.630 (0.611–0.649) |
-| AUPRC | 0.126 (0.111–0.145), vs. prevalence 0.067 |
-| Brier score | 0.062 (0.058–0.065) |
-| Top 5% of discharges flagged | 21% readmitted, 3.1× the base rate |
-| Top 10% of discharges flagged | catches 23% of readmissions, 2.3× lift |
+| logistic regression | 0.635 |
+| gradient-boosted trees (kept) | 0.640 |
 
-![evaluation](docs/evaluation.png)
+## How well it did on the most recent patients
 
-### What the results show
+- **Ranking score (AUROC): 0.630**, likely between 0.611 and 0.649. This is the chance the model scores a readmitted patient higher than one who wasn't readmitted.
+- **Readmission rate in this group: 6.7%.**
+- **Average error of the risk estimates (Brier score): 0.062.** Lower is better.
 
-1. **Useful for prioritising, not for diagnosing.** Discrimination is modest, as
-   expected from administrative data, but the highest-risk 5% are readmitted at
-   three times the base rate. With the placeholder costs, net value per 1,000
-   discharges peaks when the team reaches about the top 15%.
-2. **The strongest signals are discharge destination and prior inpatient stays,**
-   followed by primary diagnosis group and number of diagnoses.
-3. **Calibration drifts over time.** The readmission rate falls from earlier to
-   later encounters (6.7% in the test block), so a model calibrated on earlier data
-   over-predicts: mean predicted risk is about 8.5%. In a real deployment I would
-   recalibrate on the most recent months before go-live and monitor calibration
-   monthly.
-4. **Documentation changed under the model.** Payer code and medical specialty were
-   recorded very differently in later encounters (PSI 0.98 and 0.73). Shifts like
-   this usually come from upstream workflow or EHR changes, and the drift check
-   catches them before they quietly degrade a model.
-5. **Performance is not even across groups.** AUROC is 0.56 for African American
-   patients versus 0.64 for Caucasian patients, and recall at the top-10% threshold
-   is 0.14 versus 0.32. Patients aged 90+ are also under-flagged. Before any use I
-   would review this with clinical partners, check features and calibration per
-   group, and agree on acceptable thresholds.
+![charts](evaluation.png)
 
-## What the pipeline does
+The left chart compares the model's predicted risk with what actually happened. Points on the dashed line mean the predictions were right on average; points below it mean the model overestimated risk. The right chart shows what share of readmissions a care team would catch depending on how many patients it can call.
 
-```
-raw CSV ─► validate ─► clean ─► features ─► train 2 models ─► select ─► calibrate ─► evaluate ─► report
-             │            │                                              │
-       schema / range   first encounter per patient,              model.joblib + model_card.json
-       checks fail fast  drop expired/hospice, "?"→Unknown                │
-                                                                     FastAPI /score (Docker)
-```
+## What a care team would get
 
-| Step | Choice and why |
-|---|---|
-| **Validation** (`data.py`) | Required columns, unique IDs, numeric ranges and allowed target values are checked before anything is trained. A bad extract stops the run with a readable error. |
-| **Cohort** | One row per patient (first encounter) so no patient is in both train and test. Encounters ending in death or hospice are removed, because readmission can't happen. |
-| **Split** | Ordered by encounter ID (the public data has no dates): train on the earliest 60%, calibrate on the next 20%, test on the latest 20%. This mimics prospective validation better than a random split. |
-| **Features** (`features.py`) | ICD-9 codes grouped into clinical categories, prior utilisation, medication changes, A1c and glucose testing, admission and discharge context. Race and gender are **not** inputs; they are used only for the audit. |
-| **Models** (`train.py`) | Logistic regression baseline vs. gradient boosting (scikit-learn). The winner on the validation block is calibrated with isotonic regression so a score of 0.2 means about a 20% risk. |
-| **Evaluation** (`evaluate.py`) | AUROC, AUPRC, Brier with bootstrap CIs; decile calibration; permutation importance. |
-| **Operational view** | For a team that can reach the top 5–30% of discharges: precision, recall, lift, number needed to contact, and net value per 1,000 discharges. Cost and effectiveness figures are labelled **placeholders** in one dataclass, to be replaced with the hospital's own numbers. |
-| **Subgroup audit** | AUROC, calibration-in-the-large, flag rate and recall by race, gender and age at one shared threshold. |
-| **Monitoring** (`monitor.py`) | Population stability index for every input and for the risk score, with stable / watch / investigate bands. |
-| **Serving** (`api.py`) | FastAPI with typed input validation, `/health`, `/model-card` and batch `/score`. The model version is in every response. |
-| **Engineering** | 19 pytest tests (validation rules, leakage-free split, ICD-9 mapping, drift detection, API contract, end-to-end run), GitHub Actions CI, Dockerfile, Makefile. Tests run on synthetic data with the same schema, so CI never needs the real file. |
+These figures assume each readmission costs $15,000, each follow-up call costs $250, and a call prevents 20% of readmissions. They are my placeholders, not real hospital figures.
 
-## Run it
+| Patients called | Calls per 1,000 patients | Of those called, readmitted | Share of all readmissions caught | Times the normal rate | Calls needed to prevent one readmission | Net savings per 1,000 patients |
+|---|---|---|---|---|---|---|
+| top 5% | 50 | 21% | 15% | 3.1x | 24 | $18,574 |
+| top 10% | 100 | 16% | 23% | 2.3x | 32 | $21,717 |
+| top 15% | 150 | 13% | 30% | 2.0x | 38 | $22,075 |
+| top 20% | 200 | 12% | 35% | 1.7x | 43 | $19,860 |
+| top 30% | 300 | 10% | 46% | 1.5x | 48 | $18,020 |
 
-```bash
-make install
-make test          # ~10 s, synthetic data
-make train         # downloads the UCI file, writes artifacts/
-make serve         # http://localhost:8000/docs
-make docker        # build and run the API container
-```
+## Does it work equally well for everyone?
 
-```bash
-curl -X POST localhost:8000/score -H 'Content-Type: application/json' -d '{
-  "encounters": [{"encounter_id": 1, "age": "[70-80)", "time_in_hospital": 6,
-                  "number_inpatient": 2, "diag_1": "428", "discharge_disposition_id": "3",
-                  "medications": {"insulin": "Up"}}]}'
-```
+Race and sex were not given to the model. I used them only for this check. Everyone is flagged using the same cutoff (the top 10% of risk scores).
 
-## What I would do next in a real deployment
+| Group | Patients | Actually readmitted | Model's average prediction | Share flagged | Share of their readmissions caught | Ranking score |
+|---|---|---|---|---|---|---|
+| African American | 1,746 | 6.5% | 7.8% | 12% | 14% | 0.56 |
+| Asian | 183 | 8.2% | 8.1% | 15% | 53% | 0.71 |
+| White | 10,738 | 6.9% | 8.6% | 16% | 32% | 0.64 |
+| Hispanic | 442 | 5.4% | 7.7% | 12% | 29% | 0.68 |
+| Other | 370 | 5.1% | 7.7% | 11% | 21% | 0.54 |
+| Race not recorded | 519 | 5.6% | 8.9% | 22% | 24% | 0.59 |
+| Female | 7,268 | 6.7% | 8.6% | 17% | 31% | 0.63 |
+| Male | 6,730 | 6.7% | 8.3% | 14% | 28% | 0.63 |
+| Age 20-30 | 222 | 5.0% | 6.8% | 7% | 36% | 0.71 |
+| Age 30-40 | 496 | 5.4% | 6.9% | 9% | 37% | 0.73 |
+| Age 40-50 | 1,278 | 5.2% | 6.8% | 7% | 17% | 0.60 |
+| Age 50-60 | 2,425 | 5.5% | 7.2% | 9% | 19% | 0.60 |
+| Age 60-70 | 3,364 | 7.1% | 8.1% | 14% | 29% | 0.64 |
+| Age 70-80 | 3,399 | 7.5% | 9.4% | 21% | 38% | 0.62 |
+| Age 80-90 | 2,345 | 7.3% | 10.2% | 22% | 34% | 0.63 |
+| Age 90-100 | 388 | 9.0% | 9.1% | 10% | 9% | 0.54 |
 
-1. **Retrain on current local EHR data** (Epic Clarity/Caboodle or OMOP), with real
-   admission dates for a true temporal split.
-2. **Silent prospective run** for 4–8 weeks: score live discharges without showing
-   them, then compare predictions with observed readmissions before go-live.
-3. **Agree the threshold with the care team** from the capacity table, not from a
-   default cut-off.
-4. **Adoption metrics**: share of flagged patients contacted, time to contact, and
-   readmission rate in contacted vs. similar uncontacted patients.
-5. **Scheduled drift and subgroup checks**, with a retraining trigger when the score's
-   PSI goes above 0.25 or calibration slips.
-6. **Scale the feature step** to Spark if the extract grows past one machine.
+Groups with fewer than 100 patients are left out because their numbers are too unstable.
 
-## Limitations
+## What the model relied on most
 
-The data is from 1999–2008 and covers diabetic inpatients only. Readmissions to other
-hospitals aren't captured. Encounter order is only a proxy for time. The ROI figures
-depend entirely on the placeholder assumptions. This is a demonstration, not a
-clinical tool.
+How much the ranking score drops when each piece of information is scrambled. A bigger drop means the model leans on it more.
 
----
-Ankita Singh, Ph.D. · [Google Scholar](https://scholar.google.com/citations?user=xRtUSq0AAAAJ) · [LinkedIn](https://www.linkedin.com/in/ankitasingh1292)
+- where the patient went after discharge: 0.054
+- hospital stays in the past year: 0.016
+- main diagnosis: 0.012
+- number of diagnoses: 0.011
+- total visits in the past year: 0.004
+- number of diabetes medicines: 0.003
+- admitting doctor's specialty: 0.002
+- third diagnosis: 0.002
+
+## Did the data change over time?
+
+This compares the training patients with the most recent ones. Under 0.1 means little change, 0.1 to 0.25 is worth watching, and over 0.25 is a big shift.
+
+- insurance recorded or not: 0.98 (big shift)
+- admitting doctor's specialty: 0.73 (big shift)
+- where the patient went after discharge: 0.37 (big shift)
+- where the patient was admitted from: 0.33 (big shift)
+- number of diagnoses: 0.32 (big shift)
+- type of admission: 0.31 (big shift)
+
+## Limits
+
+- The data is from 1999 to 2008 and covers diabetic patients only. Hospitals work differently now, so a real model would be retrained on recent records.
+- There are no dates in the data, so I used the order of visit IDs as a stand-in for time.
+- Readmissions to a different hospital aren't in the data.
+- The savings figures depend entirely on my placeholder costs.
