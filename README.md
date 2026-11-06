@@ -5,8 +5,8 @@ try to prevent this with follow-up calls, medication checks and early appointmen
 but care teams can only reach so many people. I wanted to see how well a simple model
 could point them to the patients who need the most help.
 
-I built this project from start to finish: checking and cleaning the data, training
-the model, testing it honestly, and putting it behind a small web service that returns
+I built this project end-to-end: checking and cleaning the data, training
+the model, testing, and putting it behind a small web service that returns
 a risk score for a patient.
 
 ## The data
@@ -29,7 +29,7 @@ That left 69,987 patients. About 9% of them came back within 30 days.
 The data has no dates, but the visit IDs run roughly in time order. So I trained the
 model on the earliest 60% of visits, fine-tuned it on the next 20%, and tested it on
 the most recent 20%. This is closer to real life, where a model trained on last year's
-patients is used on this year's, than mixing everything up at random.
+patients is used on this year's.
 
 ## Results
 
@@ -37,7 +37,7 @@ On the most recent 13,998 patients:
 
 | What I measured | Result | In plain terms |
 |---|---|---|
-| Ranking ability (AUROC) | 0.63 | If you pick one patient who was readmitted and one who wasn't, the model gives the readmitted one a higher score 63% of the time. 50% would be a coin flip. |
+| Ranking ability (AUROC) | 0.63 | If you pick one patient who was readmitted and one who wasn't, the model gives the readmitted one a higher score 63% of the time. |
 | Top 5% of patients by score | 21% were readmitted | That's about 3 times the normal rate of 7%. |
 | Top 10% of patients by score | Caught 23% of all readmissions | A team calling 1 in 10 patients would reach about a quarter of the people who come back. |
 
@@ -50,7 +50,7 @@ The full numbers are in [docs/REPORT.md](docs/REPORT.md).
 **It's good at sorting patients by risk, not at predicting with certainty.** A score
 of 0.63 is modest, but that's normal for this kind of billing-style data, which
 doesn't include lab trends or doctors' notes. It's still useful: the patients it
-ranks highest really are much more likely to come back. If each follow-up call costs
+ranks highest really are much more likely to come back. hypothetically, If each follow-up call costs
 $250 and prevents 1 in 5 readmissions, the most value comes from calling roughly the
 top 15% of patients. (Those costs are my guesses, and a hospital would plug in its
 own.)
