@@ -12,19 +12,42 @@ within 30 days, so a transitional-care team can decide whom to call first.
 
 ## Results
 
-`make train` writes the full report to `artifacts/REPORT.md`. Key numbers on the
-held-out test block (latest 20% of encounters):
+Cohort: 69,987 patients (first encounter each, after excluding deaths and hospice
+discharges); 9.0% readmitted within 30 days. Held-out test block = latest 13,998
+encounters. Full report: [docs/REPORT.md](docs/REPORT.md).
 
-| | Value (95% CI) |
+| Test block (latest encounters) | Value (95% bootstrap CI) |
 |---|---|
-| AUROC | _fill in after `make train`_ |
-| AUPRC | _fill in_ (prevalence _x_) |
-| Brier score | _fill in_ |
-| Recall if the team can reach the top 10% | _fill in_ |
+| AUROC | 0.630 (0.611–0.649) |
+| AUPRC | 0.126 (0.111–0.145), vs. prevalence 0.067 |
+| Brier score | 0.062 (0.058–0.065) |
+| Top 5% of discharges flagged | 21% readmitted, 3.1× the base rate |
+| Top 10% of discharges flagged | catches 23% of readmissions, 2.3× lift |
 
-Readmission is hard to predict from administrative data, so for a care team the
-operational table in the report (who gets flagged at a given outreach capacity) matters
-more than the headline AUROC.
+![evaluation](docs/evaluation.png)
+
+### What the results show
+
+1. **Useful for prioritising, not for diagnosing.** Discrimination is modest, as
+   expected from administrative data, but the highest-risk 5% are readmitted at
+   three times the base rate. With the placeholder costs, net value per 1,000
+   discharges peaks when the team reaches about the top 15%.
+2. **The strongest signals are discharge destination and prior inpatient stays,**
+   followed by primary diagnosis group and number of diagnoses.
+3. **Calibration drifts over time.** The readmission rate falls from earlier to
+   later encounters (6.7% in the test block), so a model calibrated on earlier data
+   over-predicts: mean predicted risk is about 8.5%. In a real deployment I would
+   recalibrate on the most recent months before go-live and monitor calibration
+   monthly.
+4. **Documentation changed under the model.** Payer code and medical specialty were
+   recorded very differently in later encounters (PSI 0.98 and 0.73). Shifts like
+   this usually come from upstream workflow or EHR changes, and the drift check
+   catches them before they quietly degrade a model.
+5. **Performance is not even across groups.** AUROC is 0.56 for African American
+   patients versus 0.64 for Caucasian patients, and recall at the top-10% threshold
+   is 0.14 versus 0.32. Patients aged 90+ are also under-flagged. Before any use I
+   would review this with clinical partners, check features and calibration per
+   group, and agree on acceptable thresholds.
 
 ## What the pipeline does
 
